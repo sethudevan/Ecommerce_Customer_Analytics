@@ -1,0 +1,96 @@
+// =====================================================================
+// measures.dax  --  paste into a table called "_Measures" (Enter Data -> blank table) in Power BI Desktop.
+// Model tables expected (import data/processed/*.csv):
+//   fact_orders[order_id, customer_id, order_date, net_revenue, cogs, gross_profit, delivery_region, channel_id]
+//   fact_order_items[order_item_id, order_id, product_id, category_id, quantity, line_revenue, line_cogs, is_returned, order_status, order_date]
+//   dim_customer[customer_id, region, channel_id, channel_name, segment, activity_status, recency_days, frequency, monetary, profit]
+//   dim_product[product_id, product_name, category_name, quadrant, pareto_class]
+//   dim_channel[channel_id, channel_name, monthly_spend]    dim_date[Date, Year, Quarter, Month, MonthStart, MonthNum]
+//   cohort_retention[cohort_month, cohort_size, month_index, active_customers, retention_pct]
+// Relationships (all one-to-many, single direction):
+//   dim_date[Date] -> fact_orders[order_date]  and -> fact_order_items[order_date]
+//   dim_customer[customer_id] -> fact_orders[customer_id]
+//   dim_product[product_id] -> fact_order_items[product_id]
+//   dim_channel[channel_id] -> dim_customer[channel_id]
+// Mark dim_date as the Date table. Hide foreign keys. Set order_date columns to Date type.
+// =====================================================================
+
+// ---------- Headline KPIs ----------
+Revenue          = SUM ( fact_orders[net_revenue] )
+Gross Profit     = SUM ( fact_orders[gross_profit] )
+Profit Margin %  = DIVIDE ( [Gross Profit], [Revenue] )
+Orders           = DISTINCTCOUNT ( fact_orders[order_id] )
+Customers        = DISTINCTCOUNT ( fact_orders[customer_id] )
+AOV              = DIVIDE ( [Revenue], [Orders] )
+Revenue per Customer = DIVIDE ( [Revenue], [Customers] )
+Profit per Customer  = DIVIDE ( [Gross Profit], [Customers] )
+
+// ---------- Time intelligence ----------
+Revenue LY       = CALCULATE ( [Revenue], SAMEPERIODLASTYEAR ( dim_date[Date] ) )
+Revenue YoY %    = DIVIDE ( [Revenue] - [Revenue LY], [Revenue LY] )
+Profit LY        = CALCULATE ( [Gross Profit], SAMEPERIODLASTYEAR ( dim_date[Date] ) )
+Profit YoY %     = DIVIDE ( [Gross Profit] - [Profit LY], [Profit LY] )
+Margin LY %      = CALCULATE ( [Profit Margin %], SAMEPERIODLASTYEAR ( dim_date[Date] ) )
+Margin YoY (pts) = ( [Profit Margin %] - [Margin LY %] ) * 100
+Revenue YTD      = TOTALYTD ( [Revenue], dim_date[Date] )
+Revenue 3M Avg   = AVERAGEX ( DATESINPERIOD ( dim_date[Date], MAX ( dim_date[Date] ), -3, MONTH ), [Revenue] )
+
+// ---------- Customers and retention ----------
+Customers with 2+ Orders =
+    COUNTROWS ( FILTER ( VALUES ( fact_orders[customer_id] ),
+                         CALCULATE ( COUNTROWS ( fact_orders ) ) >= 2 ) )
+Repeat Purchase Rate %   = DIVIDE ( [Customers with 2+ Orders], [Customers] )
+
+Last Data Date           = CALCULATE ( MAX ( fact_orders[order_date] ), ALL ( dim_date ) )
+Active Customers (90d)   =
+    CALCULATE ( DISTINCTCOUNT ( fact_orders[customer_id] ),
+                DATESBETWEEN ( dim_date[Date], [Last Data Date] - 89, [Last Data Date] ) )
+Inactive Customers (180d+) = CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[activity_status] = "Inactive (180d+)" )
+Churn / Inactivity Rate %  = DIVIDE ( [Inactive Customers (180d+)],
+                                      CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[activity_status] <> "Never purchased" ) )
+
+At-Risk High-Value Customers = CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[segment] = "At-Risk (high value)" )
+At-Risk High-Value Profit    = CALCULATE ( SUM ( dim_customer[profit] ), dim_customer[segment] = "At-Risk (high value)" )
+Champions                    = CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[segment] = "Champions" )
+Avg Profit CLV               = DIVIDE ( SUM ( dim_customer[profit] ), CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[frequency] >= 1 ) )
+
+// Cohort matrix value (use with cohort_month on rows, month_index on columns)
+Cohort Retention % = AVERAGE ( cohort_retention[retention_pct] ) / 100
+
+// ---------- Acquisition cost and channel value ----------
+Months in Data       = DATEDIFF ( MIN ( dim_date[Date] ), MAX ( dim_date[Date] ), MONTH ) + 1
+Marketing Spend      = SUM ( dim_channel[monthly_spend] ) * [Months in Data]       // flat-spend shortcut; use a spend-by-month table in real life
+New Customers        = CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[frequency] >= 1 )
+CAC                  = DIVIDE ( [Marketing Spend], [New Customers] )
+CLV to CAC           = DIVIDE ( [Avg Profit CLV], [CAC] )
+Profit to Spend      = DIVIDE ( [Gross Profit], [Marketing Spend] )
+
+// ---------- Returns and cancellations ----------
+Line Return Rate %   = DIVIDE ( CALCULATE ( COUNTROWS ( fact_order_items ), fact_order_items[is_returned] = TRUE () ),
+                                COUNTROWS ( fact_order_items ) )
+Returned Revenue     = CALCULATE ( SUM ( fact_order_items[line_revenue] ), fact_order_items[is_returned] = TRUE () )
+
+// ---------- Product / Pareto ----------
+Product Profit       = SUMX ( FILTER ( fact_order_items, fact_order_items[is_returned] = FALSE () && fact_order_items[order_status] = "Completed" ),
+                              fact_order_items[line_revenue] - fact_order_items[line_cogs] )
+Product Revenue      = SUMX ( FILTER ( fact_order_items, fact_order_items[is_returned] = FALSE () && fact_order_items[order_status] = "Completed" ),
+                              fact_order_items[line_revenue] )
+Product Margin %     = DIVIDE ( [Product Profit], [Product Revenue] )
+Profit Rank (Product)= RANKX ( ALL ( dim_product[product_id] ), [Product Profit], , DESC, DENSE )
+Cumulative Profit %  =
+    VAR _p = [Product Profit]
+    VAR _tbl = ADDCOLUMNS ( ALL ( dim_product[product_id] ), "@p", [Product Profit] )
+    RETURN DIVIDE ( SUMX ( FILTER ( _tbl, [@p] >= _p ), [@p] ), SUMX ( _tbl, [@p] ) )
+
+// ---------- Alerts (drive the text cards on Page 1; thresholds are placeholders -> set from your baseline) ----------
+Margin Target %      = 0.33
+Repeat Target %      = 0.50
+Return Threshold %   = 0.10
+Alert: Margin        = IF ( [Profit Margin %] < [Margin Target %], "Margin " & FORMAT ( [Profit Margin %], "0.0%" ) & " is below target " & FORMAT ( [Margin Target %], "0%" ), BLANK () )
+Alert: Repeat Rate   = IF ( [Repeat Purchase Rate %] < [Repeat Target %], "Repeat rate " & FORMAT ( [Repeat Purchase Rate %], "0.0%" ) & " is below target", BLANK () )
+Alert: At-Risk       = IF ( [At-Risk High-Value Customers] > 0, FORMAT ( [At-Risk High-Value Customers], "#,0" ) & " high-value customers have gone quiet", BLANK () )
+Alert: Returns       = IF ( [Line Return Rate %] > [Return Threshold %], "Return rate above " & FORMAT ( [Return Threshold %], "0%" ), BLANK () )
+
+// ---------- Conditional-format helpers (use as 'Field value' in conditional formatting) ----------
+Margin Color  = IF ( [Profit Margin %] < [Margin Target %], "#D1495B", "#2A9D8F" )
+Return Color  = IF ( [Line Return Rate %] > [Return Threshold %], "#D1495B", "#8D99AE" )

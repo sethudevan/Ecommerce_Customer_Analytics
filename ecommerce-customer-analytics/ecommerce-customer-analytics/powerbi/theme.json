@@ -1,0 +1,30 @@
+{
+  "name": "Kaveri Living - Executive",
+  "dataColors": ["#1F3A5F", "#2A9D8F", "#8D99AE", "#E9A23B", "#D1495B", "#5C7AEA", "#7FB7BE", "#B8C0CC"],
+  "background": "#FFFFFF",
+  "foreground": "#1F2937",
+  "tableAccent": "#1F3A5F",
+  "good": "#2A9D8F",
+  "neutral": "#E9A23B",
+  "bad": "#D1495B",
+  "maximum": "#1F3A5F",
+  "center": "#E9A23B",
+  "minimum": "#D1495B",
+  "textClasses": {
+    "label":   { "fontSize": 10, "fontFace": "Segoe UI", "color": "#4B5563" },
+    "callout": { "fontSize": 30, "fontFace": "Segoe UI Semibold", "color": "#1F3A5F" },
+    "title":   { "fontSize": 12, "fontFace": "Segoe UI Semibold", "color": "#1F2937" },
+    "header":  { "fontSize": 11, "fontFace": "Segoe UI Semibold", "color": "#1F2937" }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "title": [{ "show": true, "fontSize": 12, "fontColor": { "solid": { "color": "#1F2937" } } }],
+        "border": [{ "show": true, "color": { "solid": { "color": "#E5E7EB" } }, "radius": 6 }],
+        "background": [{ "show": true, "color": { "solid": { "color": "#FFFFFF" } }, "transparency": 0 }],
+        "visualHeader": [{ "show": false }]
+      }
+    },
+    "page": { "*": { "background": [{ "color": { "solid": { "color": "#EDF0F4" } }, "transparency": 0 }] } }
+  }
+}
